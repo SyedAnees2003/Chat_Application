@@ -5,6 +5,9 @@ const { sendMessageService } = require("../services/message.service");
 
 let io;
 
+// userId -> Set(socketIds)
+const onlineUsers = new Map();
+
 const initSocket = (httpServer) => {
   io = new Server(httpServer, {
     cors: {
@@ -20,21 +23,31 @@ const initSocket = (httpServer) => {
 
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
       const user = await User.findByPk(decoded.id);
-
       if (!user) return next(new Error("Unauthorized"));
 
       socket.user = user;
       next();
-    } catch (err) {
+    } catch {
       next(new Error("Unauthorized"));
     }
   });
 
   io.on("connection", (socket) => {
+    const userId = socket.user.id;
+
+    // ===== USER ONLINE =====
+    if (!onlineUsers.has(userId)) {
+      onlineUsers.set(userId, new Set());
+      io.emit("user_online", userId);
+    }
+    onlineUsers.get(userId).add(socket.id);
+
+    // ===== JOIN CONVERSATION =====
     socket.on("join_conversation", (conversationId) => {
       socket.join(`conversation_${conversationId}`);
     });
 
+    // ===== SEND MESSAGE =====
     socket.on("send_message", async (data) => {
       try {
         const message = await sendMessageService({
@@ -48,14 +61,25 @@ const initSocket = (httpServer) => {
           "receive_message",
           message
         );
-      } catch (error) {
+      } catch {
         socket.emit("error_message", {
           message: "Message send failed"
         });
       }
     });
 
-    socket.on("disconnect", () => {});
+    // ===== DISCONNECT =====
+    socket.on("disconnect", () => {
+      const sockets = onlineUsers.get(userId);
+      if (!sockets) return;
+
+      sockets.delete(socket.id);
+
+      if (sockets.size === 0) {
+        onlineUsers.delete(userId);
+        io.emit("user_offline", userId);
+      }
+    });
   });
 
   return io;
@@ -66,7 +90,27 @@ const getIO = () => {
   return io;
 };
 
+// ===== MEMBER EVENTS (UNCHANGED) =====
+
+const emitMemberAdded = (conversationId, user) => {
+  if (!io) return;
+  io.to(`conversation_${conversationId}`).emit("member_added", {
+    conversationId,
+    user
+  });
+};
+
+const emitMemberRemoved = (conversationId, userId) => {
+  if (!io) return;
+  io.to(`conversation_${conversationId}`).emit("member_removed", {
+    conversationId,
+    userId
+  });
+};
+
 module.exports = {
   initSocket,
-  getIO
+  getIO,
+  emitMemberAdded,
+  emitMemberRemoved
 };

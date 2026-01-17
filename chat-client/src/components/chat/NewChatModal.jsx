@@ -5,41 +5,71 @@ import { useChat } from "../../context/ChatContext";
 import { useAuth } from "../../context/AuthContext";
 
 const NewChatModal = ({ onClose }) => {
+  const { user } = useAuth();
+  const {
+    conversations,
+    loadConversations,
+    setActiveConversation
+  } = useChat();
+
   const [users, setUsers] = useState([]);
   const [mode, setMode] = useState("private");
   const [selectedUsers, setSelectedUsers] = useState([]);
   const [groupName, setGroupName] = useState("");
-  const { loadConversations, setActiveConversation } = useChat();
-  const { user } = useAuth();
 
   useEffect(() => {
-    getUsersApi().then(res => setUsers(res.data));
+    getUsersApi().then((res) => setUsers(res.data));
   }, []);
 
-  const toggleUser = (id) => {
-    setSelectedUsers(prev =>
-      prev.includes(id)
-        ? prev.filter(u => u !== id)
-        : [...prev, id]
-    );
+  const existingPrivateConversation = (otherUserId) => {
+    return conversations.find((conversation) => {
+      if (conversation.type !== "private") return false;
+  
+      const ids = conversation.Users.map((u) => u.id);
+      return ids.includes(user.id) && ids.includes(otherUserId);
+    });
+  };
+  
+
+  const handleSelectUser = (id) => {
+    if (mode === "private") {
+      // ONLY one selection allowed
+      setSelectedUsers([id]);
+    } else {
+      // Toggle for group
+      setSelectedUsers((prev) =>
+        prev.includes(id)
+          ? prev.filter((u) => u !== id)
+          : [...prev, id]
+      );
+    }
   };
 
   const handleCreate = async () => {
-
     if (mode === "private" && selectedUsers.length !== 1) {
-        alert("Select exactly one user");
+      alert("Select exactly one user");
+      return;
+    }
+
+    if (mode === "group" && selectedUsers.length < 2) {
+      alert("Select at least two users");
+      return;
+    }
+
+    if (mode === "group" && !groupName.trim()) {
+      alert("Enter group name");
+      return;
+    }
+
+    if (mode === "private") {
+      const existing = existingPrivateConversation(selectedUsers[0]);
+    
+      if (existing) {
+        setActiveConversation(existing);
+        onClose();
         return;
       }
-  
-      if (mode === "group" && selectedUsers.length < 2) {
-        alert("Select at least two users");
-        return;
-      }
-  
-      if (mode === "group" && !groupName.trim()) {
-        alert("Enter group name");
-        return;
-      }
+    }    
 
     try {
       let res;
@@ -68,6 +98,7 @@ const NewChatModal = ({ onClose }) => {
       <div className="bg-gray-800 p-4 w-96 rounded space-y-3">
         <h2 className="text-lg font-semibold">New Chat</h2>
 
+        {/* Mode Toggle */}
         <div className="flex gap-2">
           <button
             onClick={() => {
@@ -75,18 +106,22 @@ const NewChatModal = ({ onClose }) => {
               setSelectedUsers([]);
             }}
             className={`flex-1 py-1 rounded ${
-              mode === "private" ? "bg-green-500 text-black" : "bg-gray-700"
+              mode === "private"
+                ? "bg-green-500 text-black"
+                : "bg-gray-700"
             }`}
           >
             Private
           </button>
           <button
             onClick={() => {
-                setMode("group");
-                setSelectedUsers([]);
-              }}
+              setMode("group");
+              setSelectedUsers([]);
+            }}
             className={`flex-1 py-1 rounded ${
-              mode === "group" ? "bg-green-500 text-black" : "bg-gray-700"
+              mode === "group"
+                ? "bg-green-500 text-black"
+                : "bg-gray-700"
             }`}
           >
             Group
@@ -102,25 +137,27 @@ const NewChatModal = ({ onClose }) => {
           />
         )}
 
-        {/* Users */}
-            <div className="max-h-40 overflow-y-auto space-y-1">
-            {users
-                .filter((u) => u.id !== user.id)
-                .map((u) => (
-                <label
-                    key={u.id}
-                    className="flex items-center gap-2 cursor-pointer"
-                >
-                    <input
-                    type={mode === "private" ? "radio" : "checkbox"}
-                    checked={selectedUsers.includes(u.id)}
-                    onChange={() => toggleUser(u.id)}
-                    />
-                    {u.name}
-                </label>
-                ))}
-            </div>
+        {/* User List */}
+        <div className="max-h-40 overflow-y-auto space-y-1">
+          {users
+            .filter((u) => u.id !== user.id)
+            .map((u) => (
+              <label
+                key={u.id}
+                className="flex items-center gap-2 cursor-pointer"
+              >
+                <input
+                  type={mode === "private" ? "radio" : "checkbox"}
+                  name={mode === "private" ? "privateUser" : undefined}
+                  checked={selectedUsers.includes(u.id)}
+                  onChange={() => handleSelectUser(u.id)}
+                />
+                {u.name}
+              </label>
+            ))}
+        </div>
 
+        {/* Actions */}
         <div className="flex justify-end gap-2">
           <button onClick={onClose}>Cancel</button>
           <button

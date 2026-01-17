@@ -1,12 +1,27 @@
 const { Conversation, ConversationMember, User } = require("../models");
 const { Op } = require("sequelize");
+const {
+  emitMemberAdded,
+  emitMemberRemoved
+} = require("../config/socket");
+
+const isAdmin = async (conversationId, userId) => {
+  const record = await ConversationMember.findOne({
+    where: {
+      conversation_id: conversationId,
+      user_id: userId,
+      role: "admin"
+    }
+  });
+  return !!record;
+};
 
 exports.createPrivateConversationService = async (myId, userId) => {
   if (myId === userId) {
     throw new Error("INVALID_USER");
   }
 
-  // Find existing private conversation
+  // Find existing private conversation between these two users
   const conversations = await Conversation.findAll({
     where: { type: "private" },
     include: [
@@ -17,27 +32,44 @@ exports.createPrivateConversationService = async (myId, userId) => {
     ]
   });
 
-  const existing = conversations.find((c) => {
-    const ids = c.Users.map((u) => u.id);
-    return ids.includes(myId) && ids.includes(userId);
+  const existingConversation = conversations.find((conversation) => {
+    if (conversation.Users.length !== 2) return false;
+
+    const userIds = conversation.Users.map((u) => u.id);
+    return userIds.includes(myId) && userIds.includes(userId);
   });
 
-  if (existing) {
-    return existing;
+  // 🔒 IMPORTANT: Return existing conversation instead of creating new
+  if (existingConversation) {
+    return existingConversation;
   }
 
+  // Create new private conversation
   const conversation = await Conversation.create({
     type: "private",
     created_by: myId
   });
 
   await ConversationMember.bulkCreate([
-    { conversation_id: conversation.id, user_id: myId },
-    { conversation_id: conversation.id, user_id: userId }
+    {
+      conversation_id: conversation.id,
+      user_id: myId,
+      role: "member"
+    },
+    {
+      conversation_id: conversation.id,
+      user_id: userId,
+      role: "member"
+    }
   ]);
 
   return Conversation.findByPk(conversation.id, {
-    include: [{ model: User, through: { attributes: [] } }]
+    include: [
+      {
+        model: User,
+        through: { attributes: ["role"] }
+      }
+    ]
   });
 };
 
@@ -89,8 +121,10 @@ exports.getMyConversationsService = async (userId) => {
     include: [
       {
         model: User,
-        through: { attributes: [] },
-        attributes: ['id', 'name', 'email'] // Select only needed fields
+        attributes: ["id", "name", "email"],
+        through: {
+          attributes: ["role"] // 🔥 THIS IS THE FIX
+        }
       }
     ],
     order: [["updated_at", "DESC"]]
@@ -110,4 +144,56 @@ exports.getConversationByIdService = async (id) => {
       }
     ]
   });
+};
+
+// =======================
+// MEMBERS
+// =======================
+
+exports.getConversationMembersService = async (conversationId) => {
+  return ConversationMember.findAll({
+    where: { conversation_id: conversationId },
+    include: [{ model: User }]
+  });
+};
+
+exports.addMemberToGroupService = async (
+  conversationId,
+  adminId,
+  userId
+) => {
+  const admin = await isAdmin(conversationId, adminId);
+  if (!admin) throw new Error("NOT_ADMIN");
+
+  const exists = await ConversationMember.findOne({
+    where: { conversation_id: conversationId, user_id: userId }
+  });
+  if (exists) return;
+
+  await ConversationMember.create({
+    conversation_id: conversationId,
+    user_id: userId,
+    role: "member"
+  });
+
+  const user = await User.findByPk(userId);
+  emitMemberAdded(conversationId, user);
+};
+
+exports.removeMemberFromGroupService = async (
+  conversationId,
+  adminId,
+  userId
+) => {
+  const admin = await isAdmin(conversationId, adminId);
+
+  if (!admin && adminId !== userId) {
+    throw new Error("NOT_ADMIN");
+  }
+
+  await ConversationMember.destroy({
+    where: { conversation_id: conversationId, user_id: userId }
+  });
+
+  emitMemberRemoved(conversationId, userId);
 };

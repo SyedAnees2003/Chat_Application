@@ -4,6 +4,12 @@ const {
     getMyConversationsService,
     getConversationByIdService
   } = require("../services/conversation.service");
+
+  const {
+    getConversationMembersService,
+    addMemberToGroupService,
+    removeMemberFromGroupService
+  } = require("../services/conversation.service");
   
   exports.createPrivateConversation = async (req, res) => {
     try {
@@ -54,3 +60,43 @@ const {
     }
   };
   
+  exports.getConversationMembers = async (req, res) => {
+    try {
+      const members = await getConversationMembersService(req.params.id);
+      res.json(members);
+    } catch {
+      res.status(500).json({ message: "Failed to fetch members" });
+    }
+  };
+  
+  exports.addMemberToGroup = async (req, res) => {
+    try {
+      await addMemberToGroupService(
+        req.params.id,
+        req.user.id,
+        req.body.userId
+      );
+      res.json({ message: "Member added" });
+    } catch (error) {
+      if (error.message === "NOT_ADMIN") {
+        return res.status(403).json({ message: "Only admin can add members" });
+      }
+      res.status(500).json({ message: "Failed to add member" });
+    }
+  };
+  
+  exports.removeMemberFromGroup = async (req, res) => {
+    try {
+      await removeMemberFromGroupService(
+        req.params.id,
+        req.user.id,
+        req.body.userId
+      );
+      res.json({ message: "Member removed" });
+    } catch (error) {
+      if (error.message === "NOT_ADMIN") {
+        return res.status(403).json({ message: "Only admin can remove members" });
+      }
+      res.status(500).json({ message: "Failed to remove member" });
+    }
+  };

@@ -1,4 +1,10 @@
-import { createContext, useContext, useEffect, useRef } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useRef,
+  useState
+} from "react";
 import { connectSocket, disconnectSocket, getSocket } from "../socket/socket";
 import { useAuth } from "./AuthContext";
 import { useChat } from "./ChatContext";
@@ -7,8 +13,14 @@ const SocketContext = createContext();
 
 export const SocketProvider = ({ children }) => {
   const { token } = useAuth();
-  const { activeConversation, setMessages } = useChat();
+  const {
+    activeConversation,
+    setMessages,
+    loadConversations
+  } = useChat();
+
   const socketRef = useRef(null);
+  const [onlineUsers, setOnlineUsers] = useState(new Set());
 
   useEffect(() => {
     if (!token) return;
@@ -19,8 +31,30 @@ export const SocketProvider = ({ children }) => {
       setMessages((prev) => [...prev, message]);
     });
 
+    socketRef.current.on("member_added", () => {
+      loadConversations();
+    });
+
+    socketRef.current.on("member_removed", () => {
+      loadConversations();
+    });
+
+    // ===== PRESENCE EVENTS =====
+    socketRef.current.on("user_online", (userId) => {
+      setOnlineUsers((prev) => new Set([...prev, userId]));
+    });
+
+    socketRef.current.on("user_offline", (userId) => {
+      setOnlineUsers((prev) => {
+        const copy = new Set(prev);
+        copy.delete(userId);
+        return copy;
+      });
+    });
+
     return () => {
       disconnectSocket();
+      setOnlineUsers(new Set());
     };
   }, [token]);
 
@@ -40,7 +74,9 @@ export const SocketProvider = ({ children }) => {
   };
 
   return (
-    <SocketContext.Provider value={{ sendMessageSocket }}>
+    <SocketContext.Provider
+      value={{ sendMessageSocket, onlineUsers }}
+    >
       {children}
     </SocketContext.Provider>
   );
