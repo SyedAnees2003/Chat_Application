@@ -1,10 +1,14 @@
+import { useEffect, useRef } from "react";
 import { useChat } from "../../context/ChatContext";
-import { useAuth } from "../../context/AuthContext";
 import MessageBubble from "./MessageBubble";
 
 const MessageList = () => {
   const { messages, activeConversation } = useChat();
-  const { user } = useAuth();
+  const bottomRef = useRef(null);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
 
   if (!activeConversation) {
     return (
@@ -14,15 +18,20 @@ const MessageList = () => {
     );
   }
 
+  if (!messages || messages.length === 0) {
+    return (
+      <div className="flex-1 flex items-center justify-center text-gray-500">
+        No messages yet
+      </div>
+    );
+  }
+
   return (
-    <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-gray-900">
+    <div className="flex-1 overflow-y-auto px-4 py-3 bg-gray-900 space-y-2">
       {messages.map((m) => (
-        <MessageBubble
-          key={m.id}
-          message={m.content}
-          isMine={m.sender_id === user.id}
-        />
+        <MessageBubble key={m.id} message={m} />
       ))}
+      <div ref={bottomRef} />
     </div>
   );
 };

@@ -24,6 +24,10 @@ const Message = sequelize.define(
     message_type: {
       type: DataTypes.ENUM("text", "image", "file"),
       defaultValue: "text"
+    },
+    status: {
+      type: DataTypes.ENUM("sent", "delivered", "read"),
+      defaultValue: "sent"
     }
   },
   {

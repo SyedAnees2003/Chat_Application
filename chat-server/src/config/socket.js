@@ -1,7 +1,8 @@
 const { Server } = require("socket.io");
 const jwt = require("jsonwebtoken");
-const { User } = require("../models");
+const { User, Message } = require("../models");
 const { sendMessageService } = require("../services/message.service");
+const { Op } = require("sequelize"); // ✅ REQUIRED
 
 let io;
 
@@ -43,8 +44,26 @@ const initSocket = (httpServer) => {
     onlineUsers.get(userId).add(socket.id);
 
     // ===== JOIN CONVERSATION =====
-    socket.on("join_conversation", (conversationId) => {
+    socket.on("join_conversation", async (conversationId) => {
       socket.join(`conversation_${conversationId}`);
+
+       // ✅ FIXED: Sequelize operator
+       await Message.update(
+        { status: "read" },
+        {
+          where: {
+            conversation_id: conversationId,
+            sender_id: {
+              [Op.ne]: userId
+            }
+          }
+        }
+      );
+
+      io.to(`conversation_${conversationId}`).emit(
+        "messages_read",
+        { conversationId, userId }
+      );
     });
 
     // ===== SEND MESSAGE =====
@@ -52,20 +71,48 @@ const initSocket = (httpServer) => {
       try {
         const message = await sendMessageService({
           conversationId: data.conversationId,
-          senderId: socket.user.id,
+          senderId: userId,
           content: data.content,
           messageType: data.messageType
         });
 
+        // delivered
+        await Message.update(
+          { status: "delivered" },
+          { where: { id: message.id } }
+        );
+
         io.to(`conversation_${data.conversationId}`).emit(
           "receive_message",
-          message
+          {
+            ...message.toJSON(),
+            status: "delivered"
+          }
         );
       } catch {
         socket.emit("error_message", {
           message: "Message send failed"
         });
       }
+    });
+
+    // ===== TYPING =====
+    socket.on("typing", ({ conversationId }) => {
+      socket
+        .to(`conversation_${conversationId}`)
+        .emit("user_typing", {
+          conversationId,
+          userId
+        });
+    });
+
+    socket.on("stop_typing", ({ conversationId }) => {
+      socket
+        .to(`conversation_${conversationId}`)
+        .emit("user_stop_typing", {
+          conversationId,
+          userId
+        });
     });
 
     // ===== DISCONNECT =====
@@ -90,22 +137,21 @@ const getIO = () => {
   return io;
 };
 
-// ===== MEMBER EVENTS (UNCHANGED) =====
-
+// ===== MEMBER EVENTS =====
 const emitMemberAdded = (conversationId, user) => {
   if (!io) return;
-  io.to(`conversation_${conversationId}`).emit("member_added", {
-    conversationId,
-    user
-  });
+  io.to(`conversation_${conversationId}`).emit(
+    "member_added",
+    { conversationId, user }
+  );
 };
 
 const emitMemberRemoved = (conversationId, userId) => {
   if (!io) return;
-  io.to(`conversation_${conversationId}`).emit("member_removed", {
-    conversationId,
-    userId
-  });
+  io.to(`conversation_${conversationId}`).emit(
+    "member_removed",
+    { conversationId, userId }
+  );
 };
 
 module.exports = {

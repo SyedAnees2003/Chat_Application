@@ -21,6 +21,7 @@ export const SocketProvider = ({ children }) => {
 
   const socketRef = useRef(null);
   const [onlineUsers, setOnlineUsers] = useState(new Set());
+  const [typingUsers, setTypingUsers] = useState([]);
 
   useEffect(() => {
     if (!token) return;
@@ -39,6 +40,26 @@ export const SocketProvider = ({ children }) => {
       loadConversations();
     });
 
+    socketRef.current.on("messages_read", ({ userId }) => {
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.sender_id === userId ? m : { ...m, status: "read" }
+        )
+      );
+    });
+
+    socketRef.current.on("user_typing", ({ userId }) => {
+      setTypingUsers((prev) =>
+        prev.includes(userId) ? prev : [...prev, userId]
+      );
+    });
+
+    socketRef.current.on("user_stop_typing", ({ userId }) => {
+      setTypingUsers((prev) =>
+        prev.filter((id) => id !== userId)
+      );
+    });
+
     // ===== PRESENCE EVENTS =====
     socketRef.current.on("user_online", (userId) => {
       setOnlineUsers((prev) => new Set([...prev, userId]));
@@ -55,6 +76,7 @@ export const SocketProvider = ({ children }) => {
     return () => {
       disconnectSocket();
       setOnlineUsers(new Set());
+      setTypingUsers([]);
     };
   }, [token]);
 
@@ -73,9 +95,19 @@ export const SocketProvider = ({ children }) => {
     socket.emit("send_message", data);
   };
 
+  const emitTyping = (conversationId) => {
+    const socket = getSocket();
+    socket.emit("typing", { conversationId });
+  };
+
+  const emitStopTyping = (conversationId) => {
+    const socket = getSocket();
+    socket.emit("stop_typing", { conversationId });
+  };
+
   return (
     <SocketContext.Provider
-      value={{ sendMessageSocket, onlineUsers }}
+      value={{ sendMessageSocket, onlineUsers, typingUsers, emitTyping, emitStopTyping }}
     >
       {children}
     </SocketContext.Provider>
